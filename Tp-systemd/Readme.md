@@ -1,6 +1,6 @@
 # TP1-Systemd
 
-## **I. `systemd`-basics**
+# **I. `systemd`-basics**
 
 ## 1. First steps
 
@@ -8,10 +8,7 @@
     >ps -ef
     UID          PID    PPID  C STIME TTY          TIME CMD
     root           1       0  0 11:32 ?        00:00:02 /usr/lib/systemd/systemd --switched-root
- - check tous les autres processus système (**NOT** kernel processes)
- - décrire brièvement tous les autres processus systèm
 
-    > ?????
 ## 2. Gestion du temps
 
  - déterminer la différence entre Local Time, Universal Time et RTC time
@@ -260,3 +257,125 @@ sigfail.verteiltesysteme.net: resolve call failed: DNSSEC validation failed: inv
 sigok.verteiltesysteme.net: 134.91.78.139      -- link: enp0s3
 -- Information acquired via protocol DNS in 88.2ms.
 -- Data is authenticated: yes
+
+## 5. Gestion de sessions `logind`
+
+>  loginctl
+SESSION  UID USER  SEAT  TTY
+      1 1000 yoann seat0 tty1
+      3 1000 yoann       pts/0
+2 sessions listed.
+
+>loginctl kill-session 1
+
+> loginctl
+SESSION  UID USER  SEAT TTY
+      3 1000 yoann      pts/0
+1 sessions listed.
+
+>loginctl show-session 3
+Id=3
+User=1000
+Name=yoann
+Timestamp=Fri 2019-11-29 15:02:30 CET
+TimestampMonotonic=118406420
+VTNr=0
+TTY=pts/0
+Remote=yes
+RemoteHost=192.168.50.1
+Service=sshd
+Scope=session-3.scope
+Leader=906
+Audit=3
+Type=tty
+Class=user
+Active=yes
+State=active
+IdleHint=no
+IdleSinceHint=1575041264739006
+IdleSinceHintMonotonic=5232454775
+LockedHint=no
+
+## 6. Gestion d'unité basique (services)
+
+- trouver l'unité associée au processus `chronyd`
+>ps -e -o pid,cmd,unit | grep chronyd
+   1535 /usr/sbin/chronyd           chronyd.service
+
+
+
+# **II. Boot et Logs**
+
+ - générer un graphe de la séquence de boot
+   -   `systemd-analyze plot > graphe.svg`
+   -   très utile pour du débug
+   -   déterminer le temps qu'a mis `sshd.service` à démarrer
+
+> cat graphe.svg | grep sshd.service
+  `<text class="left" x="2988.383" y="4694.000">sshd.service (152ms)</text>
+`
+
+Le service `sshd.service` a démarré en 152 ms.
+
+
+
+# III. Mécanismes manipulés par systemd
+
+## 1. cgroups
+
+ - identifier le cgroup utilisé par votre session SSH
+   -   identifier la RAM maximale à votre disposition (dans `/sys/fs/cgroup`)
+> cat /proc/934/cgroup
+11:blkio:/
+10:hugetlb:/
+9:cpuset:/
+8:pids:/user.slice/user-1000.slice/session-3.scope
+7:freezer:/
+6:devices:/user.slice
+5:perf_event:/
+4:memory:/user.slice/user-1000.slice/session-3.scope
+3:net_cls,net_prio:/
+2:cpu,cpuacct:/
+1:name=systemd:/user.slice/user-1000.slice/session-3.scope
+0::/user.slice/user-1000.slice/session-3.scope
+
+>cat /sys/fs/cgroup/memory/user.slice/user-1000.slice/session-3.scope/memory.max_usage_in_bytes
+`7741440
+`
+
+ - modifier la RAM dédiée à votre session utilisateur
+   -   `systemctl set-property <SLICE_NAME> MemoryMax=512M`
+   -   vérifier le changement
+       -   toujours dans `/sys/fs/cgroup`
+
+>systemctl set-property user-1000.slice MemoryMax=512M
+>cat /sys/fs/cgroup/memory/user.slice/user-1000.slice/session-3.scope/memory.stat | grep limit
+`hierarchical_memory_limit 536870912
+`
+
+- la commande `systemctl set-property` génère des fichiers dans `/etc/systemd/system.control/`
+  -    vérifier la création du fichier
+  -   on peut supprimer ces fichiers pour annuler les changements
+
+>ls /etc/systemd/system.control/user-1000.slice.d/
+`50-MemoryMax.conf
+`
+>cat /etc/systemd/system.control/user-1000.slice.d/50-MemoryMax.conf
+```
+# This is a drop-in unit file extension, created via "systemctl set-property"
+# or an equivalent operation. Do not edit.
+[Slice]
+MemoryMax=536870912
+```
+> sudo rm -f /etc/systemd/system.control/user-1000.slice.d/50-MemoryMax.conf
+
+
+## 2. D-Bus
+
+J'ai commencé à lire le cours et à essayer de faire cette partie mais je n'ai pas très bien compris comment interpréter les événements.
+
+
+
+
+ 
+
